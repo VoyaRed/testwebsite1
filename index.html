@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>A1Z26 Training Tool</title>
 <script src="https://js.puter.com/v2/"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&family=Space+Grotesk:wght@500;700&family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;700&display=swap');
 
@@ -448,6 +449,11 @@ button.secondary:hover {
   margin-top: 20px;
 }
 
+.post.pinned {
+  border: 1px solid var(--accent);
+  background: rgba(var(--accent-rgb), 0.03);
+}
+
 .post-header {
   display: flex;
   justify-content: space-between;
@@ -457,6 +463,13 @@ button.secondary:hover {
   margin-bottom: 12px;
   border-bottom: var(--border);
   padding-bottom: 8px;
+}
+
+.board-input-wrapper {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* Translation Layouts */
@@ -659,13 +672,24 @@ button.secondary:hover {
           <h1>Network Feed Log</h1>
           <p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">Latest network broadcasts from global translators.</p>
           
-          <div class="post">
+          <div class="post pinned">
             <div class="post-header">
-              <span>USER: 15 24</span>
-              <span>SECURE PROTOCOL</span>
+              <span>📌 PINNED: SYSTEM BROADCAST</span>
+              <span id="pinned-date">LOADING DATE...</span>
             </div>
             <div style="font-size: 15px; font-family: var(--font-mono); line-height: 1.6;">
-              "word of the day - 19 5 3 18 5 20"
+              word of the day - <span id="wotd-code" style="color: var(--accent); font-weight: 700;">...</span>
+            </div>
+          </div>
+
+          <div id="message-board-container" style="max-height: 400px; overflow-y: auto; margin-top: 20px; display: flex; flex-direction: column; gap: 12px; padding-right: 4px;">
+            </div>
+
+          <div class="board-input-wrapper">
+            <span class="decoder-label">Broadcast Anonymous Code Entry</span>
+            <div style="display: flex; gap: 10px;">
+              <input id="boardInput" autocomplete="off" placeholder="Write plain text... (It auto-encodes into A1Z26 format!)" style="max-width: none; text-align: left;">
+              <button class="action" onclick="submitToBoard()">Broadcast</button>
             </div>
           </div>
         </div>
@@ -729,7 +753,8 @@ button.secondary:hover {
               <span class="decoder-label">Bot Communication Layer</span>
               <select id="botLayer">
                 <option value="text">Output Mode: Plain Text</option>
-                <option value="code">Output Mode: Code</option>
+                <option value="code">Output Mode: 
+Code</option>
               </select>
             </div>
             <div>
@@ -781,6 +806,14 @@ button.secondary:hover {
 
 <script>
 const alpha="ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/* ==========================================================================
+   SUPABASE CLIENT CONFIGURATION
+   ========================================================================== */
+const SUPABASE_URL = "https://piglsnihujgspnpqgnvy.supabase.co"; 
+const SUPABASE_ANON_KEY = "sb_publishable_-WF3DJvFCcuDgtUrt18NCA_NNGILRED";
+
+const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Binding nodes cleanly
 const elLvl = document.getElementById("lvl");
@@ -945,7 +978,6 @@ function check(){
    ========================================================================== */
 
 function triggerBotReply(userIntentText) {
-  // Create a placeholder status bubble while waiting for Puter API
   let thinkingBubble = document.createElement("div");
   thinkingBubble.className = "chat-bubble bot";
   thinkingBubble.style.opacity = "0.6";
@@ -953,16 +985,10 @@ function triggerBotReply(userIntentText) {
   chatBox.appendChild(thinkingBubble);
   chatBox.scrollTop = chatBox.scrollHeight;
 
-  // Use Puter.js to securely execute the Claude 3.5 Sonnet framework directly in the browser
   puter.ai.chat(userIntentText, {model: 'claude-sonnet-4-6'})
     .then(response => {
-      // Safely extract text string from API output format
       let replyText = response.message.content[0].text;
-      
-      // Remove temporary processing text
       thinkingBubble.remove();
-
-      // Process raw output text according to selection layer settings (Convert to numeric A1Z26 code if chosen)
       let finalOutput = botLayer.value === "code" ? textToCode(replyText) : replyText;
       
       let bBubble = document.createElement("div");
@@ -1034,8 +1060,89 @@ function liveDecode(){
   document.getElementById("decTextOut").textContent = result;
 }
 
+/* ==========================================================================
+   DYNAMIC COMMUNITY FEATURES ENGINE
+   ========================================================================== */
+
+function initDailyWord() {
+  const today = new Date();
+  const dateString = today.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  document.getElementById("pinned-date").textContent = dateString;
+
+  // Use a string hash of today's date to pick a word deterministically
+  let hash = 0;
+  for (let i = 0; i < dateString.length; i++) {
+    hash = dateString.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const wordIndex = Math.abs(hash) % words.length;
+  const pickedWord = words[wordIndex];
+  
+  document.getElementById("wotd-code").textContent = textToCode(pickedWord);
+}
+
+async function loadBoardMessages() {
+  const container = document.getElementById("message-board-container");
+  
+  try {
+    let { data: comments, error } = await supabase
+      .from('comments')
+      .select('*')
+      .order('id', { ascending: false })
+      .limit(30);
+
+    if (error) throw error;
+
+    if(comments.length === 0) {
+      container.innerHTML = '<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px;">No encrypted entries in stream log. Be the first to emit a signal.</div>';
+      return;
+    }
+
+    container.innerHTML = comments.map(c => {
+      const formattedTime = new Date(c.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      return `
+        <div class="post">
+          <div class="post-header">
+            <span>ANONYMOUS NODE</span>
+            <span>${formattedTime}</span>
+          </div>
+          <div style="font-size: 14px; font-family: var(--font-mono); line-height: 1.5; color: var(--text);">
+            "${c.content}"
+          </div>
+        </div>
+      `;
+    }).join("");
+
+  } catch (err) {
+    console.error("Board Sync Fault:", err);
+    container.innerHTML = '<div style="color: var(--accent-secondary); font-size: 12px;">CRITICAL: Failed to load message log. Ensure your table details match in Supabase.</div>';
+  }
+}
+
+async function submitToBoard() {
+  const inputEl = document.getElementById("boardInput");
+  const rawText = inputEl.value.trim();
+  if(!rawText) return;
+
+  // Automatically translate input text to A1Z26 format for full immersion!
+  const encodedMessage = textToCode(rawText);
+
+  try {
+    const { error } = await supabase
+      .from('comments')
+      .insert([{ content: encodedMessage }]);
+
+    if (error) throw error;
+
+    inputEl.value = "";
+    await loadBoardMessages();
+  } catch (err) {
+    console.error("Transmission Error:", err);
+    alert("Network broadcast interception failed.");
+  }
+}
+
 elTheme.onchange=()=>{
-  document.body.className = "";
+  document.body.className = ""; 
   if(elTheme.value !== "1") {
     document.body.classList.add("theme-" + elTheme.value);
   }
@@ -1045,8 +1152,14 @@ elMode.onchange=nextQ;
 elDifficulty.onchange=nextQ;
 elAnswer.addEventListener("keydown",e=>{if(e.key==="Enter")check();});
 chatInput.addEventListener("keydown",e=>{if(e.key==="Enter")sendChatMessage();});
+document.getElementById("boardInput").addEventListener("keydown",e=>{if(e.key==="Enter")submitToBoard();});
 
-update();nextQ();initChatLog();
+// Run Launch Systems
+update();
+nextQ();
+initChatLog();
+initDailyWord();
+loadBoardMessages();
 </script>
 </body>
 </html>
